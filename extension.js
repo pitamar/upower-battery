@@ -1,10 +1,9 @@
-const ExtensionUtils = imports.misc.extensionUtils;
-const GLib = imports.gi.GLib;
-const Main = imports.ui.main;
-const MainLoop = imports.mainloop;
-const Me = ExtensionUtils.getCurrentExtension();
-const { IndicatorController } = Me.imports.indicator;
-const { Gio, UPowerGlib: UPower } = imports.gi;
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import Gio from 'gi://Gio';
+import UPower from 'gi://UPowerGlib';
+import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
+import { Indicator } from './indicator.js'
+
 const xml = '<node>\
    <interface name="org.freedesktop.UPower.Device">\
       <property name="Type" type="u" access="read" />\
@@ -19,22 +18,20 @@ const xml = '<node>\
 const PowerManagerProxy = Gio.DBusProxy.makeProxyWrapper(xml);
 const BUS_NAME = 'org.freedesktop.UPower';
 
-const Gettext = imports.gettext.domain(Me.metadata['gettext-domain']);
-const _ = Gettext.gettext;
 
-var Log = function (msg) {
-	if (false) {
+const Log = function (msg) {
+	if (true) {
 		log('[upower-battery] ' + msg);
 	}
 }
 
-var LogError = function (msg) {
+const LogError = function (msg) {
 	log('[upower-battery] ' + msg);
 }
 
-class Extension {
-	constructor(uuid) {
-		this._uuid = uuid;
+export default class UPowerExtension extends Extension {
+	constructor(meta) {
+		super(meta);
 		const proxy = new PowerManagerProxy(
 			Gio.DBus.system,
 			BUS_NAME,
@@ -44,12 +41,12 @@ class Extension {
 
 	enable() {
 		Log('Enable');
-		this._indicator = new IndicatorController();
+		this._indicator = new Indicator();
 		this._proxies = {};
 		Main.panel.addToStatusArea(this._uuid, this._indicator, 3, 'right');
 
-		var iname = 'org.freedesktop.UPower';
-		var sender = 'org.freedesktop.UPower';
+		const iname = 'org.freedesktop.UPower';
+		const sender = 'org.freedesktop.UPower';
 		this._subIdAdd = this._dbusCon.signal_subscribe(sender, iname, 'DeviceAdded', null, null, 0, () => {
 			Log('Device added')
 			this._refresh();
@@ -58,10 +55,10 @@ class Extension {
 			Log('Device removed')
 			this._refresh();
 		});
-		this._once = MainLoop.timeout_add(10, () => {
+		this.timeout_handle = setTimeout(() => {
 			this._refresh();
 			return false;
-		});
+		}, 10);
 	}
 
 	_refresh() {
@@ -101,8 +98,12 @@ class Extension {
 			const udevice = udevices[i];
 			if (udevice.kind in icons) {
 				if (udevice.state != UPower.DeviceState.UNKNOWN || udevice.native_path.includes("bluez")) {
-					const icon = icons[udevice.kind];
-					Log('Found device: ' + icon.icon + ' | ' + udevice.native_path);
+					let kind = udevice.kind;
+					if (udevice.model == 'MX Master 3S') {
+						kind = UPower.DeviceKind.MOUSE;
+					}
+					const icon = icons[kind];
+					Log('Found device: ' + icon.icon + ' | ' + udevice.native_path + ' | ' + kind + " | " + udevice.model);
 					devices.push({
 						name: udevice.model,
 						path: udevice.native_path,
@@ -139,13 +140,9 @@ class Extension {
 			this._indicator.destroy();
 			this._indicator = null;
 		}
-		if (this._once) {
-			MainLoop.source_remove(this._once);
-			this._once = null;
+		if (this.timeout_handle) {
+			clearTimeout(this.timeout_handle);
+			this.timeout_handle = null;
 		}
 	}
-}
-
-function init(meta) {
-	return new Extension(meta.uuid);
 }
